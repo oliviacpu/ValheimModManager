@@ -10,7 +10,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
-from ..models import ConfigAssociation, InstalledPackage, OwnedFile, PendingUpdate
+from ..models import ActivityEvent, ConfigAssociation, InstalledPackage, OwnedFile, PendingUpdate
 from .dll_meta import read_bepinex_plugin_metadata
 from .live_sync import live_only_plugin_names, path_is_under_live
 from .settings_service import log_activity, set_setting
@@ -391,12 +391,13 @@ def package_present_on_disk(pkg: InstalledPackage, settings: Settings) -> bool:
     return False
 
 
-def _wrong_name_link(pkg: InstalledPackage, item: ScannedPlugin) -> bool:
+def _wrong_name_link(db: Session, pkg: InstalledPackage, item: ScannedPlugin) -> bool:
     """A store link made by name alone that the folder's own manifest contradicts.
 
     Only local folders (manifest present) whose identity differs from the link
     are checked, so packages installed from the store into their Team-Mod
-    folder are never touched.
+    folder are never touched. Links the user chose with "Link to store package"
+    (logged as a "link" activity) are kept.
     """
     if pkg.source not in ("thunderstore", "hexium") or item.source != "local":
         return False
@@ -408,9 +409,19 @@ def _wrong_name_link(pkg: InstalledPackage, item: ScannedPlugin) -> bool:
     from .packages import get_package, name_match_fits
 
     info = get_package(pkg.source, pkg.full_name)
-    if info is None:
+    if info is None or name_match_fits(info, owner=item.owner, version=item.version):
         return False
-    return not name_match_fits(info, owner=item.owner, version=item.version)
+    linked_by_user = (
+        db.query(ActivityEvent.id)
+        .filter(
+            ActivityEvent.action == "link",
+            ActivityEvent.package == pkg.full_name,
+            ActivityEvent.source == pkg.source,
+            ActivityEvent.result == "ok",
+        )
+        .first()
+    )
+    return linked_by_user is None
 
 
 def persist_scan(
@@ -489,7 +500,7 @@ def persist_scan(
             db.flush()
             by_path[item.install_path] = pkg
         else:
-            if _wrong_name_link(pkg, item):
+            if _wrong_name_link(db, pkg, item):
                 old = (pkg.source, pkg.full_name)
                 if _claim(item.source, item.full_name, item.install_path):
                     if claimed.get(old) == pkg.install_path:

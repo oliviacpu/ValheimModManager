@@ -945,4 +945,39 @@ def test_wrong_name_link_keeps_exact_owner_name_link(monkeypatch):
         enabled=True,
         source="local",
     )
-    assert _wrong_name_link(pkg, item) is False
+    assert _wrong_name_link(None, pkg, item) is False  # type: ignore[arg-type]
+
+
+def test_wrong_name_link_keeps_user_chosen_link(tmp_path: Path, monkeypatch):
+    """A link made with "Link to store package" survives even if author/version disagree."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import Base
+    from app.models import ActivityEvent, InstalledPackage
+    from app.services.scanner import ScannedPlugin, _wrong_name_link
+
+    remote = _living_world_remote()
+    _only_thunderstore(monkeypatch, remote)
+    engine = create_engine(f"sqlite:///{(tmp_path / 't.db').as_posix()}", future=True)
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine, future=True)()
+    pkg = InstalledPackage(
+        source="thunderstore", full_name=remote.full_name, name="Living World", install_path="/p/LivingWorld"
+    )
+    item = ScannedPlugin(
+        name="Living World",
+        full_name="Living World",
+        version="1.2.0",
+        owner="Olivia's Computer Company",
+        plugin_guid=None,
+        install_path="/p/LivingWorld",
+        managed=True,
+        enabled=True,
+        source="local",
+    )
+    assert _wrong_name_link(db, pkg, item) is True
+    db.add(ActivityEvent(action="link", package=remote.full_name, source="thunderstore", result="ok"))
+    db.commit()
+    assert _wrong_name_link(db, pkg, item) is False
+    db.close()
