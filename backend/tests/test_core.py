@@ -917,3 +917,32 @@ def test_persist_scan_unlinks_wrong_name_link(tmp_path: Path, monkeypatch):
     assert json.loads(row.dependencies_json) == []
     assert db.query(PendingUpdate).count() == 0
     db.close()
+
+
+def test_wrong_name_link_keeps_exact_owner_name_link(monkeypatch):
+    """Folder 'Mod' with manifest author 'Team' linked to Team-Mod stays linked."""
+    from app.models import InstalledPackage
+    from app.services.packages import PackageInfo, PackageVersion
+    from app.services.scanner import ScannedPlugin, _wrong_name_link
+
+    remote = PackageInfo(
+        source="thunderstore",
+        name="Mod",
+        full_name="Team-Mod",
+        owner="Team",
+        versions=[PackageVersion(version_number="2.0.0", download_url="http://x")],
+    )
+    _only_thunderstore(monkeypatch, remote)
+    pkg = InstalledPackage(source="thunderstore", full_name="Team-Mod", name="Mod", install_path="/p/Mod")
+    item = ScannedPlugin(
+        name="Mod",
+        full_name="Mod",
+        version="1.0.0",
+        owner="Team",
+        plugin_guid=None,
+        install_path="/p/Mod",
+        managed=True,
+        enabled=True,
+        source="local",
+    )
+    assert _wrong_name_link(pkg, item) is False

@@ -402,6 +402,9 @@ def _wrong_name_link(pkg: InstalledPackage, item: ScannedPlugin) -> bool:
         return False
     if item.full_name == pkg.full_name:
         return False
+    # Exact owner+name identity, which match_installed_to_remote accepts without a version check
+    if item.owner and item.name and pkg.full_name == f"{item.owner}-{item.name}":
+        return False
     from .packages import get_package, name_match_fits
 
     info = get_package(pkg.source, pkg.full_name)
