@@ -128,6 +128,16 @@ class PackageOut(BaseModel):
     latest_version: str | None = None
     versions: list[PackageVersionOut] = []
     dependencies: list[str] = []
+    # Provided by the server image (BepInExPack): listed as installed, never installed here.
+    server_provided: bool = False
+
+
+class ServerPackOut(BaseModel):
+    full_name: str
+    name: str
+    version: str
+    version_source: str
+    latest_version: str | None = None
 
 
 class InstallRequest(BaseModel):

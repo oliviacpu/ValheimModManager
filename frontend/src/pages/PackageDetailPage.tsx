@@ -292,6 +292,12 @@ export default function PackageDetailPage() {
 
       <div className="rounded-2xl border border-bark/10 bg-paper/80 p-5">
         <h3 className="font-display text-2xl">Install</h3>
+        {pkg.server_provided ? (
+          <p className="mt-3 text-sm text-bark/80">
+            Installed: version {pkg.installed_version}, provided by the Valheim server image and updated with
+            it. Exports and share codes include it, so Gale and r2modman install it for players.
+          </p>
+        ) : (
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="text-sm">
             Version
@@ -327,7 +333,8 @@ export default function PackageDetailPage() {
             {installLabel}
           </button>
         </div>
-        {pkg.installed && !installing && (
+        )}
+        {pkg.installed && !installing && !pkg.server_provided && (
           <p className="mt-2 text-xs text-bark/60">Installed version: {pkg.installed_version}</p>
         )}
 

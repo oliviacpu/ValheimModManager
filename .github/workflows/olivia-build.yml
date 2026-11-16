@@ -1,0 +1,126 @@
+name: Build image (oliviacpu)
+
+# main holds our changes. Every build merges upstream's newest release into main and publishes
+# ghcr.io/oliviacpu/valheim-mod-manager. The merge happens only in the runner and is never pushed:
+# a GITHUB_TOKEN can't push upstream's own workflow changes. See FORK.md.
+
+on:
+  schedule:
+    - cron: '17 7 * * *'          # daily, ~01:17 Chicago: before the 03:00 game window picks it up
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build and publish even if this upstream release + main is already published
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+  issues: write
+
+concurrency:
+  group: olivia-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: sonicdm/ValheimModManager
+  IMAGE: ghcr.io/${{ github.repository_owner }}/valheim-mod-manager
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream's newest release
+        id: merge
+        run: |
+          set -euo pipefail
+          tag=$(gh release view -R "$UPSTREAM" --json tagName -q .tagName)
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch -q upstream "refs/tags/$tag:refs/tags/$tag"
+          ours=$(git rev-parse --short=7 HEAD)
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898341+github-actions[bot]@users.noreply.github.com'
+          if ! git merge --no-edit -m "Merge upstream $tag" "$tag"; then
+            git merge --abort || true
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            echo "::error::upstream $tag does not merge cleanly into main ($ours)"
+            exit 1
+          fi
+          version=${tag#v}
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "ours=$ours"
+            echo "image_tag=$version-olivia.$ours"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open an issue when upstream doesn't merge
+        if: failure() && steps.merge.outputs.conflict == 'true' && github.event_name != 'pull_request'
+        run: |
+          tag=$(gh release view -R "$UPSTREAM" --json tagName -q .tagName)
+          title="Upstream $tag needs a manual merge"
+          if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[].number')" ]; then
+            gh issue create --title "$title" --body "The scheduled build couldn't merge $UPSTREAM $tag into main. Merge it by hand in a PR (git fetch upstream --tags; git merge $tag), fix the conflicts, and the build after the merge publishes it. Until then the published image stays on the previous release. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+
+      - name: Already published?
+        id: decide
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin >/dev/null
+          if [ "${{ inputs.force || 'false' }}" != true ] && docker manifest inspect "$IMAGE:${{ steps.merge.outputs.image_tag }}" >/dev/null 2>&1; then
+            echo "$IMAGE:${{ steps.merge.outputs.image_tag }} is already published"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Backend tests
+        if: steps.decide.outputs.publish == 'true' || github.event_name == 'pull_request'
+        working-directory: backend
+        run: |
+          pip install -q -r requirements.txt
+          python -m pytest -q
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.decide.outputs.publish == 'true' || github.event_name == 'pull_request'
+
+      - name: Build (and publish)
+        if: steps.decide.outputs.publish == 'true' || github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ steps.decide.outputs.publish == 'true' }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.merge.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.merge.outputs.image_tag }}
+            org.opencontainers.image.revision=${{ steps.merge.outputs.ours }}
+            computer.olivia.upstream=${{ env.UPSTREAM }}@${{ steps.merge.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Close the merge issue once a build succeeds
+        if: steps.decide.outputs.publish == 'true'
+        run: |
+          for n in $(gh issue list --state open --search 'in:title "needs a manual merge"' --json number -q '.[].number'); do
+            gh issue close "$n" --comment "Published ${{ steps.merge.outputs.image_tag }}."
+          done

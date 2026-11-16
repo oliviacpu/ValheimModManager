@@ -57,6 +57,7 @@ from ..schemas import (
     ProfileUpdateRequest,
     ScanResult,
     SettingUpdate,
+    ServerPackOut,
     SettingsResponse,
 )
 from .. import __version__
@@ -66,6 +67,7 @@ from ..services import installer
 from ..services import packages as package_service
 from ..services import profiles as profile_service
 from ..services import scanner
+from ..services import server_pack as server_pack_service
 from ..services import supervisor
 from ..services import updates as update_service
 from ..services.settings_service import get_all_settings, get_setting, log_activity, update_settings
@@ -299,6 +301,22 @@ def list_plugins(
     return [_pkg_out(p, pending) for p in db.query(InstalledPackage).order_by(InstalledPackage.name).all()]
 
 
+@router.get("/server-pack", response_model=ServerPackOut | None)
+def get_server_pack(user: Annotated[AdminUser, Depends(_auth_user)]) -> ServerPackOut | None:
+    """BepInExPack as the server image provides it (not managed here; included in exports)."""
+    pack = server_pack_service.server_pack()
+    if pack is None:
+        return None
+    info = package_service.get_package("thunderstore", pack.full_name)
+    return ServerPackOut(
+        full_name=pack.full_name,
+        name=pack.name,
+        version=pack.version,
+        version_source=pack.version_source,
+        latest_version=info.latest.version_number if info and info.latest else None,
+    )
+
+
 @router.post("/plugins/import", response_model=InstalledPackageOut)
 async def import_plugin(
     user: Annotated[AdminUser, Depends(_auth_user)],
@@ -495,9 +513,11 @@ def search_packages(
         offset=offset,
     )
     outs: list[PackageOut] = []
+    server = server_pack_service.server_pack()
     for pkg in results:
         inst = installed.get(pkg.full_name)
         latest = pkg.latest
+        from_server = server is not None and pkg.full_name == server.full_name
         outs.append(
             PackageOut(
                 source=pkg.source,
@@ -512,10 +532,11 @@ def search_packages(
                 downloads=pkg.downloads,
                 categories=pkg.categories,
                 is_deprecated=pkg.is_deprecated,
-                installed=inst is not None,
-                installed_version=inst.version if inst else None,
+                installed=inst is not None or from_server,
+                installed_version=server.version if from_server else (inst.version if inst else None),
                 latest_version=latest.version_number if latest else None,
                 dependencies=latest.dependencies if latest else [],
+                server_provided=from_server,
             )
         )
     return outs
@@ -562,6 +583,8 @@ def package_detail(
         raise HTTPException(404, "Package not found — try refreshing the package index")
     inst = db.query(InstalledPackage).filter(InstalledPackage.full_name == full_name).first()
     latest = pkg.latest
+    server = server_pack_service.server_pack()
+    from_server = server is not None and pkg.full_name == server.full_name
     return PackageOut(
         source=pkg.source,
         name=pkg.name,
@@ -575,9 +598,10 @@ def package_detail(
         downloads=pkg.downloads,
         categories=pkg.categories,
         is_deprecated=pkg.is_deprecated,
-        installed=inst is not None,
-        installed_version=inst.version if inst else None,
+        installed=inst is not None or from_server,
+        installed_version=server.version if from_server else (inst.version if inst else None),
         latest_version=latest.version_number if latest else None,
+        server_provided=from_server,
         versions=[
             PackageVersionOut(
                 version_number=v.version_number,
