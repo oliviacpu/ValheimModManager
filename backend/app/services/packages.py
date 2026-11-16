@@ -347,6 +347,26 @@ def get_package(source: str, full_name: str) -> PackageInfo | None:
     return get_cached_packages(source).get(full_name)
 
 
+def _owner_key(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
+
+
+def name_match_fits(candidate: PackageInfo, *, owner: str | None, version: str | None) -> bool:
+    """Whether a match made by package name alone is believable.
+
+    Names are not unique across authors (a local "Living World" is not
+    xSAUCEY_CREATIONSx-LivingWorld). Reject the guess when the on-disk manifest
+    names a different author, or carries a version that package never published.
+    """
+    if owner and _owner_key(owner) != _owner_key(candidate.owner):
+        return False
+    if version and candidate.versions and not any(
+        v.version_number == version for v in candidate.versions
+    ):
+        return False
+    return True
+
+
 def match_installed_to_remote(
     db: Session,
     *,
@@ -359,6 +379,8 @@ def match_installed_to_remote(
     """Best-effort match of an on-disk package to Thunderstore/Hexium.
 
     Prefers exact Team-Mod full_name, then owner+name, then unique name match.
+    Name-only matches must also pass ``name_match_fits`` (same author if known,
+    installed version published by that package).
     If both stores have it, prefer prefer_source, else the one whose versions
     include the installed version, else the first enabled source that matches.
     """
@@ -379,7 +401,12 @@ def match_installed_to_remote(
                 candidates.append((src, cache[key]))
                 continue
         # Unique match by package name
-        name_matches = [p for p in cache.values() if p.name.lower() == (name or full_name).lower()]
+        name_matches = [
+            p
+            for p in cache.values()
+            if p.name.lower() == (name or full_name).lower()
+            and name_match_fits(p, owner=owner, version=version)
+        ]
         if len(name_matches) == 1:
             candidates.append((src, name_matches[0]))
 
@@ -390,9 +417,12 @@ def match_installed_to_remote(
             fuzzy = [
                 p
                 for p in get_cached_packages(src).values()
-                if p.name.lower().replace(" ", "") == needle
-                or p.full_name.lower().endswith("-" + needle)
-                or p.full_name.lower() == needle
+                if (
+                    p.name.lower().replace(" ", "") == needle
+                    or p.full_name.lower().endswith("-" + needle)
+                    or p.full_name.lower() == needle
+                )
+                and name_match_fits(p, owner=owner, version=version)
             ]
             if len(fuzzy) == 1:
                 candidates.append((src, fuzzy[0]))

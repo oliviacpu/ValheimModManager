@@ -770,3 +770,214 @@ def test_package_index_needs_refresh_respects_age(tmp_path, monkeypatch):
     assert updates_mod._package_index_needs_refresh(db, "thunderstore", 5) is True
     assert updates_mod._package_index_needs_refresh(db, "thunderstore", 0) is True
     db.close()
+
+
+def _living_world_remote():
+    from app.services.packages import PackageInfo, PackageVersion
+
+    return PackageInfo(
+        source="thunderstore",
+        name="LivingWorld",
+        full_name="xSAUCEY_CREATIONSx-LivingWorld",
+        owner="xSAUCEY_CREATIONSx",
+        versions=[
+            PackageVersion(version_number="0.19.0", download_url="http://x"),
+            PackageVersion(version_number="0.17.3", download_url="http://x"),
+        ],
+    )
+
+
+def _only_thunderstore(monkeypatch, remote):
+    from app.services import packages as pkgmod
+
+    monkeypatch.setattr(pkgmod, "enabled_sources", lambda db: ["thunderstore"])
+    monkeypatch.setattr(
+        pkgmod,
+        "get_cached_packages",
+        lambda source: {remote.full_name: remote} if source == "thunderstore" else {},
+    )
+
+
+def test_name_match_rejects_other_author(monkeypatch):
+    from app.services.packages import match_installed_to_remote
+
+    _only_thunderstore(monkeypatch, _living_world_remote())
+    matched = match_installed_to_remote(
+        db=None,  # type: ignore[arg-type]
+        full_name="Living World",
+        name="Living World",
+        owner="Olivia's Computer Company",
+        version="1.2.0",
+    )
+    assert matched is None
+
+
+def test_name_match_rejects_unpublished_version(monkeypatch):
+    from app.services.packages import match_installed_to_remote
+
+    _only_thunderstore(monkeypatch, _living_world_remote())
+    matched = match_installed_to_remote(
+        db=None,  # type: ignore[arg-type]
+        full_name="LivingWorld",
+        name="LivingWorld",
+        version="1.2.0",
+    )
+    assert matched is None
+
+
+def test_name_match_still_links_same_mod(monkeypatch):
+    from app.services.packages import match_installed_to_remote
+
+    _only_thunderstore(monkeypatch, _living_world_remote())
+    matched = match_installed_to_remote(
+        db=None,  # type: ignore[arg-type]
+        full_name="LivingWorld",
+        name="LivingWorld",
+        version="0.17.3",
+    )
+    assert matched is not None
+    assert matched[1].full_name == "xSAUCEY_CREATIONSx-LivingWorld"
+
+
+def test_persist_scan_unlinks_wrong_name_link(tmp_path: Path, monkeypatch):
+    """A local mod linked to another author's package by name goes back to local."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import Base
+    from app.models import InstalledPackage, PendingUpdate
+    from app.services import scanner as scanner_mod
+
+    plugins = tmp_path / "plugins"
+    folder = plugins / "LivingWorld"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text(
+        json.dumps(
+            {
+                "name": "Living World",
+                "version_number": "1.2.0",
+                "author": "Olivia's Computer Company",
+                "dependencies": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (folder / "LivingWorld.dll").write_bytes(b"MZ")
+
+    remote = _living_world_remote()
+    _only_thunderstore(monkeypatch, remote)
+
+    settings = Settings(data_dir=tmp_path / "data", bepinex_root=tmp_path, live_plugins_root=None)
+    settings.data_dir.mkdir(parents=True)
+    engine = create_engine(f"sqlite:///{(tmp_path / 't.db').as_posix()}", future=True)
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine, future=True)()
+    db.add(
+        InstalledPackage(
+            source="thunderstore",
+            full_name=remote.full_name,
+            name="Living World",
+            owner="Olivia's Computer Company",
+            version="1.2.0",
+            install_path=str(folder),
+            managed=True,
+            enabled=True,
+            package_url="https://thunderstore.io/c/valheim/p/xSAUCEY_CREATIONSx/LivingWorld/",
+            dependencies_json=json.dumps(["ValheimModding-Jotunn-2.30.2"]),
+        )
+    )
+    db.add(
+        PendingUpdate(
+            source="thunderstore",
+            full_name=remote.full_name,
+            current_version="1.2.0",
+            target_version="0.19.0",
+            download_url="http://x",
+            status="queued",
+        )
+    )
+    db.commit()
+
+    monkeypatch.setattr(scanner_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(scanner_mod, "set_setting", lambda *a, **k: None)
+    monkeypatch.setattr(scanner_mod, "log_activity", lambda *a, **k: None)
+    monkeypatch.setattr(
+        scanner_mod,
+        "read_bepinex_plugin_metadata",
+        lambda *_a, **_k: type(
+            "M", (), {"guid": "computer.olivia.livingworld", "name": "Living World", "version": "1.2.0"}
+        )(),
+    )
+
+    scanner_mod.persist_scan(db, settings)
+    row = db.query(InstalledPackage).one()
+    assert row.source == "local"
+    assert row.full_name == "Living World"
+    assert row.package_url is None
+    assert json.loads(row.dependencies_json) == []
+    assert db.query(PendingUpdate).count() == 0
+    db.close()
+
+
+def test_wrong_name_link_keeps_exact_owner_name_link(monkeypatch):
+    """Folder 'Mod' with manifest author 'Team' linked to Team-Mod stays linked."""
+    from app.models import InstalledPackage
+    from app.services.packages import PackageInfo, PackageVersion
+    from app.services.scanner import ScannedPlugin, _wrong_name_link
+
+    remote = PackageInfo(
+        source="thunderstore",
+        name="Mod",
+        full_name="Team-Mod",
+        owner="Team",
+        versions=[PackageVersion(version_number="2.0.0", download_url="http://x")],
+    )
+    _only_thunderstore(monkeypatch, remote)
+    pkg = InstalledPackage(source="thunderstore", full_name="Team-Mod", name="Mod", install_path="/p/Mod")
+    item = ScannedPlugin(
+        name="Mod",
+        full_name="Mod",
+        version="1.0.0",
+        owner="Team",
+        plugin_guid=None,
+        install_path="/p/Mod",
+        managed=True,
+        enabled=True,
+        source="local",
+    )
+    assert _wrong_name_link(None, pkg, item) is False  # type: ignore[arg-type]
+
+
+def test_wrong_name_link_keeps_user_chosen_link(tmp_path: Path, monkeypatch):
+    """A link made with "Link to store package" survives even if author/version disagree."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import Base
+    from app.models import ActivityEvent, InstalledPackage
+    from app.services.scanner import ScannedPlugin, _wrong_name_link
+
+    remote = _living_world_remote()
+    _only_thunderstore(monkeypatch, remote)
+    engine = create_engine(f"sqlite:///{(tmp_path / 't.db').as_posix()}", future=True)
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine, future=True)()
+    pkg = InstalledPackage(
+        source="thunderstore", full_name=remote.full_name, name="Living World", install_path="/p/LivingWorld"
+    )
+    item = ScannedPlugin(
+        name="Living World",
+        full_name="Living World",
+        version="1.2.0",
+        owner="Olivia's Computer Company",
+        plugin_guid=None,
+        install_path="/p/LivingWorld",
+        managed=True,
+        enabled=True,
+        source="local",
+    )
+    assert _wrong_name_link(db, pkg, item) is True
+    db.add(ActivityEvent(action="link", package=remote.full_name, source="thunderstore", result="ok"))
+    db.commit()
+    assert _wrong_name_link(db, pkg, item) is False
+    db.close()
