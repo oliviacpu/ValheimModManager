@@ -19,6 +19,7 @@ from .live_sync import path_is_under_live
 from .packages import get_cached_packages, get_package
 from .r2_profile import ExportMode, ParsedProfile, ProfileModSpec
 from .paths import ensure_within, safe_join
+from .player_mods import for_players
 from .server_pack import with_server_pack
 from .settings_service import get_setting, log_activity, set_setting
 
@@ -347,7 +348,7 @@ def build_export_zip(
         use_cfg = True if include_configs is None else include_configs
         configs = r2_profile.collect_bepinex_configs(settings.bepinex_root) if use_cfg else {}
         community = "valheim"
-    export_mods = with_server_pack(mods_for_export(mods, mode))
+    export_mods = with_server_pack(for_players(db, mods_for_export(mods, mode)))
     data = r2_profile.build_r2z_bytes(
         name=name, mods=export_mods, config_files=configs, mode=mode, community=community
     )

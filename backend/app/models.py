@@ -150,3 +150,14 @@ class ModProfile(Base):
     style = Column(String(32), nullable=True, default="gale")
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PlayerRequirement(Base):
+    """Whether players need a mod (oliviacpu fork). Only overrides are stored; the default comes
+    from the store's client/server categories. See services/player_mods.py."""
+
+    __tablename__ = "player_requirements"
+
+    full_name = Column(String(255), primary_key=True)
+    players_need = Column(Boolean, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

@@ -126,6 +126,8 @@ export type InstalledPackage = {
   owned_files: string[];
   update_available?: string | null;
   live_only?: boolean;
+  players_need?: boolean;
+  players_need_origin?: "you" | "tags" | "default";
 };
 
 export type Package = {

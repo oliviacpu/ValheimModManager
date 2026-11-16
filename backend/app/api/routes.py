@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from ..auth.security import (
     check_rate_limit,
@@ -57,6 +57,8 @@ from ..schemas import (
     ProfileUpdateRequest,
     ScanResult,
     SettingUpdate,
+    PlayersNeedOut,
+    PlayersNeedRequest,
     ServerPackOut,
     SettingsResponse,
 )
@@ -67,6 +69,7 @@ from ..services import installer
 from ..services import packages as package_service
 from ..services import profiles as profile_service
 from ..services import scanner
+from ..services import player_mods
 from ..services import server_pack as server_pack_service
 from ..services import supervisor
 from ..services import updates as update_service
@@ -100,6 +103,12 @@ def _pkg_out(pkg: InstalledPackage, pending_map: dict[str, str] | None = None) -
     from ..services.live_sync import path_is_under_live
 
     settings = get_settings()
+    session = object_session(pkg)
+    need = (
+        player_mods.players_need(session, pkg.full_name, pkg.source)
+        if session is not None
+        else player_mods.from_tags(pkg.full_name, pkg.source)
+    )
     return InstalledPackageOut(
         id=pkg.id,
         source=pkg.source,
@@ -122,6 +131,8 @@ def _pkg_out(pkg: InstalledPackage, pending_map: dict[str, str] | None = None) -
         update_available=pending_map.get(f"{pkg.source}:{pkg.full_name}"),
         last_scanned_at=pkg.last_scanned_at,
         live_only=path_is_under_live(pkg.install_path, settings),
+        players_need=need.needed,
+        players_need_origin=need.origin,
     )
 
 
@@ -315,6 +326,20 @@ def get_server_pack(user: Annotated[AdminUser, Depends(_auth_user)]) -> ServerPa
         version_source=pack.version_source,
         latest_version=info.latest.version_number if info and info.latest else None,
     )
+
+
+@router.put("/players-need", response_model=PlayersNeedOut)
+def put_players_need(
+    body: PlayersNeedRequest,
+    user: Annotated[AdminUser, Depends(_auth_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> PlayersNeedOut:
+    """Mark whether players need a mod (exports leave out the ones they don't). null = use tags."""
+    name = body.full_name.strip()
+    if not name:
+        raise HTTPException(400, "full_name is required")
+    need = player_mods.set_players_need(db, name, body.players_need)
+    return PlayersNeedOut(full_name=name, players_need=need.needed, players_need_origin=need.origin)
 
 
 @router.post("/plugins/import", response_model=InstalledPackageOut)
