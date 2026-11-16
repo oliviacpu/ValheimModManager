@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, InstalledPackage, Package } from "../api/client";
+import { api, InstalledPackage, Package, ServerPack } from "../api/client";
 import RowMenu from "../components/RowMenu";
 import { StatusToast, useStatusToast } from "../components/StatusToast";
 import { summarizeApply, type ApplyResult } from "../lib/updates";
@@ -14,6 +14,7 @@ type LinkForm = {
 
 export default function InstalledPage() {
   const [packages, setPackages] = useState<InstalledPackage[]>([]);
+  const [serverPack, setServerPack] = useState<ServerPack | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
@@ -25,7 +26,12 @@ export default function InstalledPage() {
   const toast = useStatusToast();
 
   const load = useCallback(async () => {
-    setPackages(await api.get<InstalledPackage[]>("/api/plugins"));
+    const [plugins, pack] = await Promise.all([
+      api.get<InstalledPackage[]>("/api/plugins"),
+      api.get<ServerPack | null>("/api/server-pack").catch(() => null),
+    ]);
+    setPackages(plugins);
+    setServerPack(pack);
   }, []);
 
   useEffect(() => {
@@ -257,6 +263,31 @@ export default function InstalledPage() {
             </tr>
           </thead>
           <tbody>
+            {serverPack && (
+              <tr className="border-b border-bark/5 align-top">
+                <td className="px-4 py-3">
+                  <Link
+                    to={`/discover/thunderstore/${encodeURIComponent(serverPack.full_name)}`}
+                    className="font-medium hover:underline"
+                  >
+                    {serverPack.name}
+                  </Link>
+                  <p className="text-xs text-bark/50">{serverPack.full_name}</p>
+                  {serverPack.version_source === "thunderstore" && (
+                    <p className="text-xs text-bark/50">Version from Thunderstore (server manifest not mounted)</p>
+                  )}
+                </td>
+                <td className="px-4 py-3">{serverPack.version}</td>
+                <td className="px-4 py-3">
+                  <span className="rounded-full bg-mist px-2 py-0.5 text-xs">thunderstore</span>
+                  <span className="ml-1 rounded-full bg-moss/15 px-2 py-0.5 text-xs text-moss-deep">
+                    server
+                  </span>
+                </td>
+                <td className="px-4 py-3">Enabled</td>
+                <td className="px-4 py-3 text-xs text-bark/50">Updated with the server · included in exports</td>
+              </tr>
+            )}
             {packages.map((pkg) => (
               <tr key={pkg.id} className="border-b border-bark/5 align-top">
                 <td className="px-4 py-3">

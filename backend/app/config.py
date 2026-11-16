@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     bepinex_root: Path = Path("/valheim/bepinex")
     # Deprecated: do not mount data/bepinex. Kept for env compatibility; always unused when None.
     live_plugins_root: Path | None = None
+    # Server image's unpacked BepInExPack manifest (read-only); see services/server_pack.py.
+    server_pack_manifest: Path | None = Path("/valheim/server-pack/manifest.json")
     host: str = "0.0.0.0"
     port: int = 8090
     secret_key: str = "change-me-in-production"

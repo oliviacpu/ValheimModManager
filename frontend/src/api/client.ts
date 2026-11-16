@@ -146,6 +146,15 @@ export type Package = {
   latest_version?: string | null;
   versions?: PackageVersion[];
   dependencies: string[];
+  server_provided?: boolean;
+};
+
+export type ServerPack = {
+  full_name: string;
+  name: string;
+  version: string;
+  version_source: "manifest" | "thunderstore" | string;
+  latest_version?: string | null;
 };
 
 export type PackageVersion = {
