@@ -52,6 +52,8 @@ class InstalledPackageOut(BaseModel):
     update_available: str | None = None
     last_scanned_at: datetime | None = None
     live_only: bool = False
+    players_need: bool = True
+    players_need_origin: str = "default"
 
     model_config = {"from_attributes": True}
 
@@ -162,6 +164,18 @@ class LinkPackageRequest(BaseModel):
     source: str
     full_name: str
     version: str | None = None
+
+
+class PlayersNeedRequest(BaseModel):
+    full_name: str
+    # None clears the override and goes back to the store's client/server tags
+    players_need: bool | None = None
+
+
+class PlayersNeedOut(BaseModel):
+    full_name: str
+    players_need: bool
+    players_need_origin: str
 
 
 class PackageActionRequest(BaseModel):

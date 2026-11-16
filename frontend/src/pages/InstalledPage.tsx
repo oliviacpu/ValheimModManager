@@ -5,6 +5,20 @@ import RowMenu from "../components/RowMenu";
 import { StatusToast, useStatusToast } from "../components/StatusToast";
 import { summarizeApply, type ApplyResult } from "../lib/updates";
 
+function playersNeedTitle(pkg: InstalledPackage): string {
+  const what =
+    pkg.players_need === false
+      ? "Server only: left out of exports and share codes."
+      : "Players need this: included in exports and share codes.";
+  const why =
+    pkg.players_need_origin === "you"
+      ? "Set by you."
+      : pkg.players_need_origin === "tags"
+        ? "From the store's client/server tags."
+        : "No client/server tags, so it's included.";
+  return `${what} ${why} Click to change.`;
+}
+
 type LinkForm = {
   id: number;
   source: string;
@@ -259,6 +273,9 @@ export default function InstalledPage() {
               <th className="px-4 py-3">Version</th>
               <th className="px-4 py-3">Source</th>
               <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3" title="Exports and share codes leave out mods players don't need">
+                Players
+              </th>
               <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
@@ -285,6 +302,7 @@ export default function InstalledPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3">Enabled</td>
+                <td className="px-4 py-3">Needed</td>
                 <td className="px-4 py-3 text-xs text-bark/50">Updated with the server · included in exports</td>
               </tr>
             )}
@@ -319,6 +337,40 @@ export default function InstalledPage() {
                 <td className="px-4 py-3">
                   {pkg.enabled ? "Enabled" : "Disabled"}
                   {pkg.pinned && " · Pinned"}
+                </td>
+                <td className="px-4 py-3">
+                  <button
+                    type="button"
+                    disabled={busy === pkg.id || updating}
+                    className={
+                      pkg.players_need === false
+                        ? "rounded-full bg-ember/15 px-2 py-0.5 text-xs text-ember hover:bg-ember/25"
+                        : "rounded-full bg-moss/15 px-2 py-0.5 text-xs text-moss-deep hover:bg-moss/25"
+                    }
+                    title={playersNeedTitle(pkg)}
+                    onClick={() => {
+                      const needed = pkg.players_need === false;
+                      act(
+                        pkg.id,
+                        () =>
+                          api.put("/api/players-need", {
+                            full_name: pkg.full_name,
+                            players_need: needed,
+                          }),
+                        {
+                          busy: `Saving ${pkg.name}…`,
+                          ok: needed
+                            ? `${pkg.name} will be in exports.`
+                            : `${pkg.name} left out of exports.`,
+                        },
+                      );
+                    }}
+                  >
+                    {pkg.players_need === false ? "Server only" : "Needed"}
+                  </button>
+                  {pkg.players_need_origin === "you" && (
+                    <p className="mt-1 text-[10px] text-bark/50">set by you</p>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap items-center gap-1">
@@ -386,6 +438,25 @@ export default function InstalledPage() {
                               : "Link store…",
                           onClick: () => openLink(pkg),
                         },
+                        ...(pkg.players_need_origin === "you"
+                          ? [
+                              {
+                                key: "players-tags",
+                                label: "Players: use store tags",
+                                title: "Forget your choice and go by the store's client/server tags",
+                                onClick: () =>
+                                  act(
+                                    pkg.id,
+                                    () =>
+                                      api.put("/api/players-need", {
+                                        full_name: pkg.full_name,
+                                        players_need: null,
+                                      }),
+                                    { busy: `Saving ${pkg.name}…`, ok: `${pkg.name} follows store tags.` },
+                                  ),
+                              },
+                            ]
+                          : []),
                         {
                           key: "persist",
                           label: pkg.live_only ? "Make normal" : "Make persistent",

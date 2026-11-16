@@ -13,6 +13,12 @@ for one home server. Nothing here is sent upstream.
 - The version comes from the pack's Thunderstore manifest as the server unpacked it. Mount the
   Valheim container's `/opt/valheim/dl/bepinex/extracted` read-only at `/valheim/server-pack`, or
   set `SERVER_PACK_MANIFEST` to the manifest's path. Without it, the newest Thunderstore version is used.
+- **Exports leave out server-only mods.** The Installed page has a Players column: "Needed" or
+  "Server only". It starts from the store's client/server categories (tagged server-side and not
+  client-side means server only; untagged means needed) and you can click to change any mod.
+  "Players: use store tags" in the row menu forgets your choice. Exports and share codes skip
+  server-only mods; a kept mod's dependencies still install in Gale either way. Code:
+  `backend/app/services/player_mods.py`, overrides in the `player_requirements` table.
 
 The code is in `backend/app/services/server_pack.py`, with small hooks in `profiles.py`,
 `api/routes.py` and the Installed and package pages.
