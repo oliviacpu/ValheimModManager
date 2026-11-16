@@ -31,6 +31,11 @@ for one home server. Nothing here is sent upstream.
   .cfg/.yml/.yaml/.ini in mod folders (not `templates/`). An export also drops `BepInEx.cfg`, the
   settings of server-only mods, and any file with a password/secret/token/API key setting
   (ValheimAdmin's). Code: `is_setting_file` in `r2_profile.py`, `services/player_configs.py`.
+- **Rescans keep store versions.** Some packages unpack without `manifest.json` (OdinEye,
+  YamlDotNet), so a rescan only sees the DLL's assembly version (1.0.0.0, 1.0.0) and used to write
+  it over the Thunderstore version, which then went into profiles and exports. Store-installed
+  rows now keep their version unless a manifest says otherwise. Code: `version_from_dll` in
+  `scanner.py`.
 
 The code is in `backend/app/services/server_pack.py`, with small hooks in `profiles.py`,
 `api/routes.py` and the Installed and package pages.

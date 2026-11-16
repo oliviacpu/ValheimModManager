@@ -33,6 +33,9 @@ class ScannedPlugin:
     dependencies: list[str] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
     config_files: list[str] = field(default_factory=list)
+    # oliviacpu fork: version is the DLL's assembly version (no manifest version_number).
+    # That often isn't the package version (OdinEye 1.2.39 reports 1.0.0.0).
+    version_from_dll: bool = False
 
 
 def _file_sha256(path: Path) -> str:
@@ -229,6 +232,7 @@ def _scan_folder(
             name=manifest.get("name") or entry.name,
             full_name=full_name if owner else (manifest.get("name") or entry.name),
             version=manifest.get("version_number") or version,
+            version_from_dll=not manifest.get("version_number"),
             owner=owner or manifest.get("author"),
             plugin_guid=guid,
             install_path=str(entry),
@@ -244,6 +248,7 @@ def _scan_folder(
         name=name or entry.name,
         full_name=entry.name,
         version=version,
+        version_from_dll=True,
         owner=None,
         plugin_guid=guid,
         install_path=str(entry),
@@ -308,6 +313,7 @@ def scan_plugins(settings: Settings | None = None) -> list[ScannedPlugin]:
                     name=m.name or dll.stem,
                     full_name=dll.stem,
                     version=m.version,
+                    version_from_dll=True,
                     owner=None,
                     plugin_guid=m.guid,
                     install_path=str(dll),
@@ -336,6 +342,7 @@ def scan_plugins(settings: Settings | None = None) -> list[ScannedPlugin]:
                     name=m.name or Path(active_name).stem,
                     full_name=Path(active_name).stem,
                     version=m.version,
+                    version_from_dll=True,
                     owner=None,
                     plugin_guid=m.guid,
                     install_path=str(disabled),
@@ -537,7 +544,9 @@ def persist_scan(
                 pkg.install_path = item.install_path
             pkg.name = item.name
             pkg.owner = item.owner or pkg.owner
-            pkg.version = item.version or pkg.version
+            # Never let a DLL's assembly version replace what a store install recorded.
+            if item.version and not (item.version_from_dll and pkg.source in ("thunderstore", "hexium")):
+                pkg.version = item.version
             pkg.plugin_guid = item.plugin_guid or pkg.plugin_guid
             pkg.enabled = item.enabled
             if item.description:
