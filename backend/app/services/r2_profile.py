@@ -327,6 +327,26 @@ async def upload_share_code(zip_bytes: bytes, *, backend: str) -> str:
 
 
 _SKIP_CONFIG_TOP = frozenset({"plugins", "patchers", ".persistent", "cache", "core"})
+# oliviacpu fork: settings inside a mod's own config folder. JSON, logs, images and the like
+# in those folders are runtime data (ValheimAdmin player sessions, WebMap history), not settings.
+_FOLDER_SETTING_SUFFIXES = frozenset({".cfg", ".yml", ".yaml", ".ini"})
+
+
+def is_setting_file(disk_rel: str) -> bool:
+    """True for a real settings file, given its path relative to the BepInEx config dir.
+
+    Top level: ``*.cfg``. Mod folders: .cfg/.yml/.yaml/.ini, except generated ``templates/``.
+    Plugin, patcher and cache folders never hold settings.
+    """
+    parts = PurePosixPath(disk_rel).parts
+    if not parts or parts[0] in _SKIP_CONFIG_TOP:
+        return False
+    suffix = PurePosixPath(disk_rel).suffix.lower()
+    if len(parts) == 1:
+        return suffix == ".cfg"
+    if any(p.lower() == "templates" for p in parts[1:-1]):
+        return False
+    return suffix in _FOLDER_SETTING_SUFFIXES
 
 
 def _disk_rel_from_profile_config(rel: str) -> str:
@@ -357,13 +377,13 @@ def collect_bepinex_configs(bepinex_root: Path) -> dict[str, bytes]:
             rel = path.relative_to(bepinex_root).as_posix()
         except ValueError:
             continue
-        top = rel.split("/", 1)[0]
-        if top in _SKIP_CONFIG_TOP:
-            continue
-        if path.suffix.lower() not in {".cfg", ".txt", ".json", ".yml", ".yaml", ".ini"}:
+        # The Valheim stack can mount this same dir again at <root>/config, so strip that
+        # prefix before checking; otherwise its plugins/ folder slips through.
+        disk_rel = _disk_rel_from_profile_config(rel)
+        if not is_setting_file(disk_rel):
             continue
         # Export as config/<rel> for r2modman/Gale zip compatibility.
-        export_rel = rel if rel.startswith("config/") else f"config/{rel}"
+        export_rel = f"config/{disk_rel}"
         try:
             out[export_rel] = path.read_bytes()
         except OSError:
