@@ -23,6 +23,13 @@ for one home server. Nothing here is sent upstream.
 The code is in `backend/app/services/server_pack.py`, with small hooks in `profiles.py`,
 `api/routes.py` and the Installed and package pages.
 
+- **Local mods aren't linked to store packages by name alone.** Upstream linked our own
+  "Living World" to xSAUCEY_CREATIONSx-LivingWorld because the names match without spaces, then
+  queued that mod as an "update". A name-only match now also needs the same author, if the manifest
+  has an `author`, and the installed version must be one that package published. The next scan
+  undoes wrong links made earlier and drops their queued updates. The code is `name_match_fits` in
+  `packages.py`, plus `_wrong_name_link` in `scanner.py`.
+
 ## Builds
 
 [`olivia-build.yml`](.github/workflows/olivia-build.yml) runs every day, on every push to main, and

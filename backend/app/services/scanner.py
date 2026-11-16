@@ -391,6 +391,25 @@ def package_present_on_disk(pkg: InstalledPackage, settings: Settings) -> bool:
     return False
 
 
+def _wrong_name_link(pkg: InstalledPackage, item: ScannedPlugin) -> bool:
+    """A store link made by name alone that the folder's own manifest contradicts.
+
+    Only local folders (manifest present) whose identity differs from the link
+    are checked, so packages installed from the store into their Team-Mod
+    folder are never touched.
+    """
+    if pkg.source not in ("thunderstore", "hexium") or item.source != "local":
+        return False
+    if item.full_name == pkg.full_name:
+        return False
+    from .packages import get_package, name_match_fits
+
+    info = get_package(pkg.source, pkg.full_name)
+    if info is None:
+        return False
+    return not name_match_fits(info, owner=item.owner, version=item.version)
+
+
 def persist_scan(
     db: Session, settings: Settings | None = None, *, reason: str = "manual"
 ) -> tuple[list[InstalledPackage], list[str]]:
@@ -467,6 +486,26 @@ def persist_scan(
             db.flush()
             by_path[item.install_path] = pkg
         else:
+            if _wrong_name_link(pkg, item):
+                old = (pkg.source, pkg.full_name)
+                if _claim(item.source, item.full_name, item.install_path):
+                    if claimed.get(old) == pkg.install_path:
+                        claimed.pop(old, None)
+                    db.query(PendingUpdate).filter(
+                        PendingUpdate.source == old[0],
+                        PendingUpdate.full_name == old[1],
+                    ).delete(synchronize_session=False)
+                    logger.info(
+                        "Unlink %s from %s/%s: manifest author or version does not match",
+                        item.install_path,
+                        old[0],
+                        old[1],
+                    )
+                    pkg.source = item.source
+                    pkg.full_name = item.full_name
+                    pkg.package_url = None
+                    pkg.icon_url = None
+                    pkg.dependencies_json = json.dumps(item.dependencies)
             # Preserve thunderstore/hexium source if already linked
             if pkg.source not in ("thunderstore", "hexium"):
                 # Do not demote a managed package when revisiting via a weaker match
