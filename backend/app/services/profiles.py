@@ -14,6 +14,7 @@ from ..config import get_settings
 from ..models import InstalledPackage, ModProfile
 from . import backup as backup_service
 from . import installer
+from . import player_configs
 from . import r2_profile
 from .live_sync import path_is_under_live
 from .packages import get_cached_packages, get_package
@@ -392,7 +393,7 @@ def build_export_zip(
     data = r2_profile.build_r2z_bytes(
         name=name,
         mods=export_mods,
-        config_files=configs,
+        config_files=player_configs.for_players(db, configs),
         mode=mode,
         community=community,
         extra_files=own_mod_files(db),

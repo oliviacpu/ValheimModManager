@@ -24,6 +24,13 @@ for one home server. Nothing here is sent upstream.
   `BepInEx/plugins/<folder>/`. Only mods players need are included; mark server-only ones (like
   LivingWorld) "Server only". Players must pick **All files** in Gale's Import profile dialog,
   because the default "Config files only" skips `.dll` files. Code: `own_mod_files` in `profiles.py`.
+- **Profiles and exports carry settings only.** Upstream took every .cfg/.json/.yml/.txt/.ini
+  under the config dir, and the Valheim stack mounts that dir a second time at `config/`, so
+  plugin manifests, `.deps.json`, templates and runtime data (ValheimAdmin players and sessions,
+  WebMap history) went into profiles and packs. Now a profile keeps top-level `*.cfg` plus
+  .cfg/.yml/.yaml/.ini in mod folders (not `templates/`). An export also drops `BepInEx.cfg`, the
+  settings of server-only mods, and any file with a password/secret/token/API key setting
+  (ValheimAdmin's). Code: `is_setting_file` in `r2_profile.py`, `services/player_configs.py`.
 
 The code is in `backend/app/services/server_pack.py`, with small hooks in `profiles.py`,
 `api/routes.py` and the Installed and package pages.
