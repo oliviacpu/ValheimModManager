@@ -88,3 +88,40 @@ def test_export_leaves_out_server_only(tmp_path, monkeypatch):
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         mods = yaml.safe_load(zf.read("export.r2x"))["mods"]
     assert [m["name"] for m in mods] == ["j1gA-LivingMap", "Someone-Untagged"]
+
+
+def test_export_bundles_own_mods_players_need(tmp_path, monkeypatch):
+    """Our own mods aren't on any store, so their files ride in the zip; server-only ones don't."""
+    from app.models import InstalledPackage
+
+    db = _use(monkeypatch, tmp_path)
+    plugins = tmp_path / "bepinex" / "plugins"
+    for folder, name in (("SmarterHoeUnlocks", "SmarterHoe Unlocks"), ("LivingWorld", "Living World")):
+        d = plugins / folder
+        d.mkdir()
+        (d / f"{folder}.dll").write_bytes(b"MZ" + folder.encode())
+        (d / "manifest.json").write_text("{}", encoding="utf-8")
+        db.add(
+            InstalledPackage(
+                source="local",
+                full_name=name,
+                name=name,
+                version="1.0.0",
+                install_path=str(d),
+                managed=True,
+                enabled=True,
+            )
+        )
+    db.commit()
+    player_mods.set_players_need(db, "Living World", False)
+    secret = tmp_path / "secret.cfg"
+    secret.write_text("password=hunter2", encoding="utf-8")
+    (plugins / "SmarterHoeUnlocks" / "linked.cfg").symlink_to(secret)
+
+    data, _ = profile_service.build_export_zip(db, mode="thunderstore", include_configs=False)
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        names = set(zf.namelist())
+        assert zf.read("BepInEx/plugins/SmarterHoeUnlocks/SmarterHoeUnlocks.dll") == b"MZSmarterHoeUnlocks"
+    assert "BepInEx/plugins/SmarterHoeUnlocks/manifest.json" in names
+    assert "BepInEx/plugins/SmarterHoeUnlocks/linked.cfg" not in names
+    assert not any(n.startswith("BepInEx/plugins/LivingWorld/") for n in names)

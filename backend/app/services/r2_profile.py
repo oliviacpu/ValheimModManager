@@ -254,7 +254,9 @@ def build_r2z_bytes(
     config_files: dict[str, bytes] | None = None,
     mode: ExportMode = "full",
     community: str | None = "valheim",
+    extra_files: dict[str, bytes] | None = None,
 ) -> bytes:
+    """``extra_files`` are written as-is (zip path -> bytes), e.g. our own plugin files."""
     include_source = mode == "full"
     manifest = build_manifest_dict(
         name=name, mods=mods, community=community, include_source=include_source
@@ -269,6 +271,8 @@ def build_r2z_bytes(
             else:
                 # r2modman-style: config/... without BepInEx prefix
                 member = rel[len("BepInEx/") :] if rel.startswith("BepInEx/") else rel
+            zf.writestr(member, content)
+        for member, content in (extra_files or {}).items():
             zf.writestr(member, content)
     return buf.getvalue()
 

@@ -19,6 +19,11 @@ for one home server. Nothing here is sent upstream.
   "Players: use store tags" in the row menu forgets your choice. Exports and share codes skip
   server-only mods; a kept mod's dependencies still install in Gale either way. Code:
   `backend/app/services/player_mods.py`, overrides in the `player_requirements` table.
+- **Exports carry our own mods.** Mods that aren't on any store (a `manifest.json` folder in
+  plugins) can't be downloaded by Gale, so exports put their files in the zip under
+  `BepInEx/plugins/<folder>/`. Only mods players need are included; mark server-only ones (like
+  LivingWorld) "Server only". Players must pick **All files** in Gale's Import profile dialog,
+  because the default "Config files only" skips `.dll` files. Code: `own_mod_files` in `profiles.py`.
 
 The code is in `backend/app/services/server_pack.py`, with small hooks in `profiles.py`,
 `api/routes.py` and the Installed and package pages.

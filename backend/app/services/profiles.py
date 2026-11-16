@@ -19,7 +19,7 @@ from .live_sync import path_is_under_live
 from .packages import get_cached_packages, get_package
 from .r2_profile import ExportMode, ParsedProfile, ProfileModSpec
 from .paths import ensure_within, safe_join
-from .player_mods import for_players
+from .player_mods import for_players, overrides, players_need
 from .server_pack import with_server_pack
 from .settings_service import get_setting, log_activity, set_setting
 
@@ -327,6 +327,46 @@ def mods_for_export(mods: list[ProfileModSpec], mode: ExportMode) -> list[Profil
     return out
 
 
+def own_mod_files(db: Session) -> dict[str, bytes]:
+    """Files of our own mods (not on any store) that players need, for the export zip.
+
+    Gale only downloads store mods, so these travel as files under
+    BepInEx/plugins/<folder>/. Players get them by choosing "All files" in Gale's
+    Import profile dialog; the default "Config files only" skips .dll files.
+    Mods marked as not needed by players (e.g. server-only LivingWorld) stay out.
+    """
+    known = overrides(db)
+    files: dict[str, bytes] = {}
+    rows = (
+        db.query(InstalledPackage)
+        .filter(
+            InstalledPackage.source == "local",
+            InstalledPackage.managed.is_(True),
+            InstalledPackage.enabled.is_(True),
+        )
+        .order_by(InstalledPackage.full_name)
+        .all()
+    )
+    for pkg in rows:
+        if not players_need(db, pkg.full_name, "local", known=known).needed:
+            continue
+        root = Path(pkg.install_path)
+        if not root.is_dir():
+            continue
+        real_root = root.resolve()
+        for path in sorted(root.rglob("*")):
+            # Like collect_bepinex_configs: never follow links out of the mod's own folder
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                path.resolve().relative_to(real_root)
+            except ValueError:
+                continue
+            rel = path.relative_to(root).as_posix()
+            files[f"BepInEx/plugins/{root.name}/{rel}"] = path.read_bytes()
+    return files
+
+
 def build_export_zip(
     db: Session,
     *,
@@ -350,7 +390,12 @@ def build_export_zip(
         community = "valheim"
     export_mods = with_server_pack(for_players(db, mods_for_export(mods, mode)))
     data = r2_profile.build_r2z_bytes(
-        name=name, mods=export_mods, config_files=configs, mode=mode, community=community
+        name=name,
+        mods=export_mods,
+        config_files=configs,
+        mode=mode,
+        community=community,
+        extra_files=own_mod_files(db),
     )
     safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in name) or "profile"
     return data, f"{safe}.r2z"
