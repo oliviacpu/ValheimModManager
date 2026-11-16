@@ -114,10 +114,14 @@ def test_export_bundles_own_mods_players_need(tmp_path, monkeypatch):
         )
     db.commit()
     player_mods.set_players_need(db, "Living World", False)
+    secret = tmp_path / "secret.cfg"
+    secret.write_text("password=hunter2", encoding="utf-8")
+    (plugins / "SmarterHoeUnlocks" / "linked.cfg").symlink_to(secret)
 
     data, _ = profile_service.build_export_zip(db, mode="thunderstore", include_configs=False)
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         names = set(zf.namelist())
         assert zf.read("BepInEx/plugins/SmarterHoeUnlocks/SmarterHoeUnlocks.dll") == b"MZSmarterHoeUnlocks"
     assert "BepInEx/plugins/SmarterHoeUnlocks/manifest.json" in names
+    assert "BepInEx/plugins/SmarterHoeUnlocks/linked.cfg" not in names
     assert not any(n.startswith("BepInEx/plugins/LivingWorld/") for n in names)

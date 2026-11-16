@@ -353,10 +353,17 @@ def own_mod_files(db: Session) -> dict[str, bytes]:
         root = Path(pkg.install_path)
         if not root.is_dir():
             continue
+        real_root = root.resolve()
         for path in sorted(root.rglob("*")):
-            if path.is_file():
-                rel = path.relative_to(root).as_posix()
-                files[f"BepInEx/plugins/{root.name}/{rel}"] = path.read_bytes()
+            # Like collect_bepinex_configs: never follow links out of the mod's own folder
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                path.resolve().relative_to(real_root)
+            except ValueError:
+                continue
+            rel = path.relative_to(root).as_posix()
+            files[f"BepInEx/plugins/{root.name}/{rel}"] = path.read_bytes()
     return files
 
 
